@@ -50,31 +50,60 @@ def collect_human_input_2(state: MessagesState):
 
 def generate_section(state: MessagesState):
     print("\n--- NOEUD : RÉDACTION ---")
-    prompt = SYSTEM_PROMPT + "\nTACHE : Rédige la section demandée. Si l'utilisateur est d'accord, n'hésite pas à être long et structuré."
-    return {"messages": [llm_q.invoke([SystemMessage(content=prompt)] + state["messages"])]}
+    
+    messages_propres = []
+    for msg in state["messages"]:
+        if hasattr(msg, "tool_calls") and msg.tool_calls:
+            continue 
+        if msg.type == "tool":
+            continue
+        messages_propres.append(msg)
+    
+    consigne = "\nTACHE : Rédige maintenant la section complète sur la base de nos échanges. Sois structuré, académique et n'utilise AUCUN outil."
+    
+    instruction = SystemMessage(content=SYSTEM_PROMPT + consigne)
+    
+    try:
+        response = llm_q.invoke([instruction] + messages_propres)
+        return {"messages": [response]}
+    except Exception as e:
+        print(f"Erreur Redaction : {e}")
+        return {"messages": [llm_q.invoke([instruction] + messages_propres[-3:])]}
 
 def validation(state: MessagesState):
     print("\n--- [Nœud : VALIDATION] ---")
     llm_chat = init_chat_model("mistral-large-2512")
     
+    all_messages = state["messages"]
+    
     prompt = "TACHE : Tu viens de rédiger une section. Demande explicitement à l'utilisateur s'il valide ce contenu (Oui) ou s'il souhaite des modifications (Non)."
     
-    messages_pour_mistral = state["messages"] + [HumanMessage(content="Demande-moi ma validation sur ce texte.")]
+    derniere_redaction = all_messages[-1] 
+    
     instruction = SystemMessage(content=SYSTEM_PROMPT + "\n" + prompt)
     
-    response = llm_chat.invoke([instruction] + messages_pour_mistral)
-    return {"messages": [response]}
+    messages_pour_mistral = [
+        instruction,
+        derniere_redaction,
+        HumanMessage(content="Demande-moi ma validation sur le texte ci-dessus.")
+    ]
+    
+    try:
+        response = llm_chat.invoke(messages_pour_mistral)
+        return {"messages": [response]}
+    except Exception as e:
+        print(f"Erreur lors de l'appel Mistral : {e}")
+        return {"messages": [HumanMessage(content="La rédaction est terminée. Est-ce que cela vous convient ? (Oui/Non)")]}
 
 def sauvegarde(state: MessagesState):
     print("\n--- [Nœud : SAUVEGARDE] ---")
-    llm_save = init_chat_model("mistral-large-2512").bind_tools(tools_validation)
     
     prompt = "TACHE : L'utilisateur a validé. Tu DOIS maintenant utiliser l'outil 'write_report_tool' pour enregistrer la section rédigée précédemment."
     
     messages_pour_mistral = state["messages"] + [HumanMessage(content="Enregistre la section dans le fichier rapport_stage.md maintenant.")]
     instruction = SystemMessage(content=SYSTEM_PROMPT + "\n" + prompt)
     
-    response = llm_save.invoke([instruction] + messages_pour_mistral)
+    response = llm_v.invoke([instruction] + messages_pour_mistral)
     return {"messages": [response]}
 
 
